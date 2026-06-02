@@ -36,11 +36,13 @@
         const video = document.getElementById('input-video');
         const canvas = document.getElementById('particle-canvas');
         const status = document.getElementById('status');
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { willReadFrequently: false });
 
         let handLandmarker;
         let gestureState = 'none';
         const particles = [];
+        let isRunning = true;
+        let animationId;
 
         const NUM_PARTICLES = 2000;
         const SPHERE_RADIUS = 250;
@@ -83,7 +85,7 @@
                 const y2d = this.y * scale + centerY;
                 ctx.fillStyle = `rgba(100, 210, 255, ${scale - 0.2})`;
                 ctx.beginPath();
-                ctx.arc(x2d, y2d, Math.max(0.5, scale * 1.5), 0, 7);
+                ctx.arc(x2d, y2d, Math.max(0.5, scale * 1.5), 0, Math.PI * 2);
                 ctx.fill();
             }
         }
@@ -130,25 +132,31 @@
 
         let lastTime = -1;
         function render() {
-            // 物理更新
-            ctx.fillStyle = 'rgba(0, 5, 15, 0.3)';
+            if (!isRunning) return;
+
+            // 物理更新 - 调整透明度以获得更好的拖尾效果
+            ctx.fillStyle = 'rgba(0, 5, 15, 0.15)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
             if (video.currentTime !== lastTime) {
-                const result = handLandmarker.detectForVideo(video, performance.now());
-                if (result.landmarks && result.landmarks.length > 0) {
-                    const wrist = result.landmarks[0][0];
-                    const tip = result.landmarks[0][8]; // 食指尖
-                    const dist = Math.sqrt((wrist.x-tip.x)**2 + (wrist.y-tip.y)**2);
-                    gestureState = dist < 0.25 ? 'fist' : 'open';
-                } else {
-                    gestureState = 'none';
+                try {
+                    const result = handLandmarker.detectForVideo(video, performance.now());
+                    if (result.landmarks && result.landmarks.length > 0) {
+                        const wrist = result.landmarks[0][0];
+                        const tip = result.landmarks[0][8]; // 食指尖
+                        const dist = Math.sqrt((wrist.x-tip.x)**2 + (wrist.y-tip.y)**2);
+                        gestureState = dist < 0.25 ? 'fist' : 'open';
+                    } else {
+                        gestureState = 'none';
+                    }
+                    lastTime = video.currentTime;
+                } catch (e) {
+                    console.warn('手势检测错误:', e);
                 }
-                lastTime = video.currentTime;
             }
 
             particles.forEach(p => { p.update(); p.draw(); });
-            requestAnimationFrame(render);
+            animationId = requestAnimationFrame(render);
         }
 
         window.addEventListener('resize', () => {
@@ -156,6 +164,15 @@
             canvas.height = window.innerHeight;
             centerX = canvas.width / 2;
             centerY = canvas.height / 2;
+        });
+
+        // 清理资源
+        window.addEventListener('beforeunload', () => {
+            isRunning = false;
+            if (animationId) cancelAnimationFrame(animationId);
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
         });
 
         start();
